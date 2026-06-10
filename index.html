@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reserva da Mata — Mapa Interativo Fase 1</title>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #1a2e1a;
+      color: #333;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #1a2e1a;
+      color: #fff;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+      border-bottom: 2px solid #3a7a3a;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    header .subtitle { font-size: 0.75rem; color: #8fc98f; margin-top: 1px; }
+    .header-logo {
+      width: 36px; height: 36px;
+      background: #3a7a3a; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem; flex-shrink: 0;
+    }
+    .header-spacer { flex: 1; }
+
+    /* Calibration toggle button */
+    #btn-calibrate {
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1.5px solid #5ab05a;
+      background: transparent;
+      color: #8fc98f;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    #btn-calibrate:hover { background: #2d4a2d; }
+    #btn-calibrate.active { background: #c8a000; border-color: #c8a000; color: #fff; }
+    #btn-calibrate.active:hover { background: #a87f00; }
+
+    /* Calibration banner */
+    #calib-banner {
+      display: none;
+      background: #7a5800;
+      color: #ffe082;
+      font-size: 0.78rem;
+      padding: 6px 16px;
+      text-align: center;
+      flex-shrink: 0;
+      border-bottom: 1px solid #c8a000;
+    }
+    #calib-banner.visible { display: block; }
+    #calib-banner strong { color: #fff; }
+
+    /* ── Layout ── */
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Map ── */
+    #map { flex: 1; background: #2d4a2d; }
+    #map.calibrating { cursor: crosshair !important; }
+    #map.calibrating .leaflet-container { cursor: crosshair !important; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 270px;
+      background: #fff;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      border-left: 1px solid #ddd;
+      flex-shrink: 0;
+    }
+    .sidebar-section { padding: 14px 16px; border-bottom: 1px solid #eee; }
+    .sidebar-section h3 {
+      font-size: 0.68rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px;
+      color: #888; margin-bottom: 10px;
+    }
+
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .stat-card {
+      background: #f7faf7; border: 1px solid #d0e8d0;
+      border-radius: 8px; padding: 9px; text-align: center;
+    }
+    .stat-card .val { font-size: 1.5rem; font-weight: 700; color: #2d6a2d; line-height: 1; }
+    .stat-card .lbl { font-size: 0.65rem; color: #666; margin-top: 3px; line-height: 1.3; }
+    .stat-card.highlight { background: #eaf4ea; border-color: #a0d0a0; }
+    .stat-card.highlight .val { color: #1a5c1a; }
+
+    .progress-wrap { margin-top: 8px; }
+    .progress-label { display: flex; justify-content: space-between; font-size: 0.68rem; color: #666; margin-bottom: 3px; }
+    .progress-bar { height: 5px; background: #e0e0e0; border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg,#3a8a3a,#5ab05a); border-radius: 3px; transition: width 0.4s; }
+
+    .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 0.75rem; color: #444; }
+    .legend-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid rgba(0,0,0,0.15); }
+
+    /* Calibration panel (replaces legend when active) */
+    #calib-panel { display: none; padding: 14px 16px; border-bottom: 1px solid #eee; }
+    #calib-panel.visible { display: block; }
+    #calib-panel h3 { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #8a6000; margin-bottom: 10px; }
+    .calib-hint { font-size: 0.75rem; color: #555; line-height: 1.5; margin-bottom: 10px; }
+    .calib-hint span { display: block; padding: 3px 0; }
+    .calib-hint .ico { margin-right: 5px; }
+    #btn-export-calib {
+      width: 100%; padding: 8px;
+      background: #2d6a2d; color: #fff;
+      border: none; border-radius: 6px;
+      font-size: 0.78rem; font-weight: 600;
+      cursor: pointer; margin-bottom: 6px;
+    }
+    #btn-export-calib:hover { background: #1a5c1a; }
+    #btn-reset-calib {
+      width: 100%; padding: 6px;
+      background: transparent; color: #c00;
+      border: 1px solid #c00; border-radius: 6px;
+      font-size: 0.72rem; cursor: pointer;
+    }
+    #btn-reset-calib:hover { background: #fff0f0; }
+    .calib-count { font-size: 0.72rem; color: #666; text-align: center; margin-top: 6px; }
+
+    .search-wrap { padding: 8px 16px; border-bottom: 1px solid #eee; }
+    .search-wrap input {
+      width: 100%; padding: 6px 10px;
+      border: 1px solid #ccc; border-radius: 6px;
+      font-size: 0.78rem; outline: none;
+    }
+    .search-wrap input:focus { border-color: #3a8a3a; }
+
+    .lot-list-header {
+      padding: 10px 16px 6px;
+      font-size: 0.68rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px; color: #888;
+      border-bottom: 1px solid #eee;
+      position: sticky; top: 0; background: #fff;
+    }
+    .lot-list { flex: 1; overflow-y: auto; }
+    .lot-item {
+      padding: 7px 16px; border-bottom: 1px solid #f0f0f0;
+      cursor: pointer; transition: background 0.15s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .lot-item:hover { background: #f0f7f0; }
+    .lot-item.active { background: #e0f0e0; }
+    .lot-badge { background: #e8f4e8; color: #2d6a2d; font-size: 0.63rem; font-weight: 700; padding: 2px 5px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; }
+    .lot-name { font-size: 0.76rem; color: #333; flex: 1; }
+    .lot-name.empty { color: #aaa; font-style: italic; }
+    .rep-badge { font-size: 0.6rem; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
+    .rep-sim { background: #d4edda; color: #155724; }
+    .rep-nao { background: #f8d7da; color: #721c24; }
+    .empty-state { text-align: center; padding: 24px 16px; color: #aaa; font-size: 0.78rem; }
+
+    /* ── Tooltip ── */
+    .leaflet-tooltip.lot-tooltip {
+      background: rgba(30,60,30,0.92); color: #fff;
+      border: none; border-radius: 6px;
+      padding: 5px 10px; font-size: 0.76rem;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      pointer-events: none;
+    }
+    .leaflet-tooltip.lot-tooltip::before { border-top-color: rgba(30,60,30,0.92); }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5); z-index: 9999;
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal {
+      background: #fff; border-radius: 10px;
+      padding: 24px; width: 320px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    .modal h3 { font-size: 1rem; margin-bottom: 16px; color: #1a2e1a; }
+    .modal label { font-size: 0.78rem; color: #555; display: block; margin-bottom: 4px; margin-top: 12px; }
+    .modal label:first-of-type { margin-top: 0; }
+    .modal input, .modal select {
+      width: 100%; padding: 8px 10px;
+      border: 1px solid #ccc; border-radius: 6px;
+      font-size: 0.85rem; outline: none;
+    }
+    .modal input:focus, .modal select:focus { border-color: #3a8a3a; }
+    .modal-actions { display: flex; gap: 8px; margin-top: 18px; }
+    .modal-actions button { flex: 1; padding: 9px; border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer; border: none; }
+    .btn-confirm { background: #2d6a2d; color: #fff; }
+    .btn-confirm:hover { background: #1a5c1a; }
+    .btn-cancel { background: #eee; color: #333; }
+    .btn-cancel:hover { background: #ddd; }
+    .btn-delete { background: #c00; color: #fff; }
+    .btn-delete:hover { background: #900; }
+
+    /* Export output */
+    #export-output {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6); z-index: 9999;
+      align-items: center; justify-content: center;
+    }
+    #export-output.visible { display: flex; }
+    .export-box {
+      background: #1a1a1a; color: #0f0; border-radius: 10px;
+      padding: 20px; width: 90%; max-width: 680px; max-height: 80vh;
+      display: flex; flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+    .export-box h3 { color: #fff; margin-bottom: 6px; font-size: 0.9rem; }
+    .export-box p { color: #aaa; font-size: 0.75rem; margin-bottom: 10px; }
+    .export-box textarea {
+      flex: 1; background: #111; color: #0f0; border: 1px solid #333;
+      border-radius: 6px; padding: 10px; font-family: monospace; font-size: 0.72rem;
+      resize: none; outline: none; min-height: 200px;
+    }
+    .export-box-actions { display: flex; gap: 8px; margin-top: 12px; }
+    .export-box-actions button { padding: 8px 16px; border-radius: 6px; border: none; font-size: 0.78rem; font-weight: 600; cursor: pointer; }
+    .btn-copy { background: #2d6a2d; color: #fff; }
+    .btn-copy:hover { background: #1a5c1a; }
+    .btn-close-export { background: #555; color: #fff; }
+    .btn-close-export:hover { background: #333; }
+
+    /* Popup */
+    .lot-popup { font-family: 'Segoe UI', Arial, sans-serif; min-width: 175px; }
+    .lot-popup .pop-header { background: #2d6a2d; color: #fff; padding: 7px 11px; font-weight: 700; font-size: 0.82rem; border-radius: 4px 4px 0 0; margin: -1px -1px 0; }
+    .lot-popup .pop-body { padding: 9px 11px; }
+    .lot-popup .pop-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; font-size: 0.78rem; }
+    .lot-popup .pop-row:last-child { margin-bottom: 0; }
+    .lot-popup .pop-label { color: #888; font-size: 0.7rem; }
+    .lot-popup .pop-value { font-weight: 600; color: #333; }
+    .lot-popup .pop-name { color: #1a5c1a; }
+    .lot-popup .rep-tag { font-size: 0.68rem; padding: 2px 6px; border-radius: 10px; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-logo">🌿</div>
+  <div>
+    <h1>Reserva da Mata — Fase 1</h1>
+    <div class="subtitle">Mapa Interativo de Proprietários</div>
+  </div>
+  <div class="header-spacer"></div>
+  <button id="btn-calibrate" onclick="toggleCalibration()">✏️ Modo Calibração</button>
+</header>
+
+<div id="calib-banner">
+  <strong>Modo Calibração ativo</strong> — <span id="calib-hint-text">Clique em um marcador existente para editar. Clique em área vazia do mapa para adicionar novo lote.</span>
+</div>
+
+<div class="main">
+  <div id="map"></div>
+
+  <aside class="sidebar">
+    <!-- Stats -->
+    <div class="sidebar-section">
+      <h3>Resumo</h3>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="val" id="stat-total">—</div>
+          <div class="lbl">Lotes<br>mapeados</div>
+        </div>
+        <div class="stat-card">
+          <div class="val" id="stat-quadras">—</div>
+          <div class="lbl">Quadras<br>no mapa</div>
+        </div>
+        <div class="stat-card">
+          <div class="val" id="stat-owners">—</div>
+          <div class="lbl">Lotes com<br>dados</div>
+        </div>
+        <div class="stat-card highlight">
+          <div class="val" id="stat-rep">—</div>
+          <div class="lbl">Adeptos à repr.<br>jurídica</div>
+        </div>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-label"><span>Lotes com dados</span><span id="pct-owners">0%</span></div>
+        <div class="progress-bar"><div class="progress-fill" id="bar-owners" style="width:0%"></div></div>
+      </div>
+      <div class="progress-wrap" style="margin-top:5px">
+        <div class="progress-label"><span>Adeptos à representação</span><span id="pct-rep">0%</span></div>
+        <div class="progress-bar"><div class="progress-fill" id="bar-rep" style="width:0%;background:linear-gradient(90deg,#1a6c8a,#3aaad0)"></div></div>
+      </div>
+    </div>
+
+    <!-- Legend (normal mode) -->
+    <div id="legend-panel" class="sidebar-section">
+      <h3>Legenda</h3>
+      <div class="legend-item"><div class="legend-dot" style="background:#4CAF50"></div><span>Adepto à representação jurídica</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#FF9800"></div><span>Não adepto à representação</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#9E9E9E"></div><span>Sem dados cadastrados</span></div>
+    </div>
+
+    <!-- Calibration panel -->
+    <div id="calib-panel">
+      <h3>🛠 Calibração de Lotes</h3>
+      <div class="calib-hint">
+        <span><span class="ico">🖱</span><strong>Marcador existente:</strong> clique para editar quadra/lote ou excluir</span>
+        <span><span class="ico">➕</span><strong>Área vazia:</strong> clique para adicionar novo marcador</span>
+        <span><span class="ico">💾</span>Alterações são salvas automaticamente no navegador</span>
+      </div>
+      <button id="btn-export-calib" onclick="exportCalibration()">⬇ Exportar dados atualizados</button>
+      <button id="btn-reset-calib" onclick="resetCalibration()">↺ Restaurar dados originais</button>
+      <div class="calib-count" id="calib-count"></div>
+    </div>
+
+    <!-- Search + list -->
+    <div class="search-wrap">
+      <input type="text" id="search-input" placeholder="Buscar quadra ou lote..." />
+    </div>
+    <div class="lot-list-header">Lista de lotes</div>
+    <div class="lot-list" id="lot-list">
+      <div class="empty-state">Carregando...</div>
+    </div>
+  </aside>
+</div>
+
+<!-- Edit modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <h3 id="modal-title">Editar Lote</h3>
+    <label>Quadra</label>
+    <input type="number" id="modal-quadra" min="1" max="99" placeholder="Ex: 11" />
+    <label>Lote</label>
+    <input type="number" id="modal-lote" min="1" max="999" placeholder="Ex: 3" />
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-delete" id="btn-modal-delete" onclick="deleteCurrentMarker()" style="display:none">Excluir</button>
+      <button class="btn-confirm" onclick="confirmModal()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Export output -->
+<div id="export-output">
+  <div class="export-box">
+    <h3>Dados exportados — LOT_POSITIONS atualizado</h3>
+    <p>Copie o conteúdo abaixo e substitua o array <code>LOT_POSITIONS</code> no arquivo index.html</p>
+    <textarea id="export-textarea" readonly></textarea>
+    <div class="export-box-actions">
+      <button class="btn-copy" onclick="copyExport()">📋 Copiar</button>
+      <button class="btn-close-export" onclick="document.getElementById('export-output').classList.remove('visible')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// MAP SETUP
+// ============================================================
+const IMG_W = 7257, IMG_H = 5443;
+
+const map = L.map('map', {
+  crs: L.CRS.Simple,
+  minZoom: -3, maxZoom: 3,
+  zoomSnap: 0.25,
+  attributionControl: false
+});
+
+const bounds = [[0,0],[IMG_H,IMG_W]];
+L.imageOverlay('mapa_fase1.png', bounds).addTo(map);
+map.fitBounds(bounds);
+
+function pctToLatLng(cx_pct, cy_pct) {
+  return [IMG_H - (cy_pct/100*IMG_H), cx_pct/100*IMG_W];
+}
+function latLngToPct(latlng) {
+  return {
+    cx_pct: parseFloat((latlng.lng / IMG_W * 100).toFixed(3)),
+    cy_pct: parseFloat(((IMG_H - latlng.lat) / IMG_H * 100).toFixed(3))
+  };
+}
+
+// ============================================================
+// LOT POSITIONS (original, extracted from PDF)
+// ============================================================
+const LOT_POSITIONS_ORIGINAL = [{"quadra":3,"lote":8,"cx_pct":71.232,"cy_pct":55.467,"area_m2":1000.71},{"quadra":2,"lote":1,"cx_pct":72.3,"cy_pct":59.532,"area_m2":1001.24},{"quadra":3,"lote":1,"cx_pct":65.46,"cy_pct":52.253,"area_m2":1000.08},{"quadra":3,"lote":3,"cx_pct":64.835,"cy_pct":54.655,"area_m2":1000.72},{"quadra":3,"lote":4,"cx_pct":65.807,"cy_pct":55.695,"area_m2":1000.38},{"quadra":3,"lote":5,"cx_pct":67.049,"cy_pct":54.754,"area_m2":1000.25},{"quadra":3,"lote":6,"cx_pct":68.383,"cy_pct":54.4,"area_m2":1000.35},{"quadra":5,"lote":10,"cx_pct":61.93,"cy_pct":70.478,"area_m2":1166.16},{"quadra":9,"lote":1,"cx_pct":45.275,"cy_pct":41.603,"area_m2":1077.33},{"quadra":9,"lote":2,"cx_pct":46.113,"cy_pct":42.776,"area_m2":1032.75},{"quadra":9,"lote":18,"cx_pct":48.647,"cy_pct":43.012,"area_m2":1002.11},{"quadra":9,"lote":3,"cx_pct":46.421,"cy_pct":44.268,"area_m2":1002},{"quadra":9,"lote":17,"cx_pct":49.135,"cy_pct":44.616,"area_m2":1003.49},{"quadra":9,"lote":4,"cx_pct":46.682,"cy_pct":45.514,"area_m2":1001.08},{"quadra":9,"lote":5,"cx_pct":46.938,"cy_pct":46.85,"area_m2":1002.95},{"quadra":9,"lote":16,"cx_pct":50.101,"cy_pct":45.938,"area_m2":1000.79},{"quadra":9,"lote":6,"cx_pct":47.714,"cy_pct":48.062,"area_m2":1009.42},{"quadra":9,"lote":15,"cx_pct":50.568,"cy_pct":47.1,"area_m2":1000.46},{"quadra":9,"lote":14,"cx_pct":51.294,"cy_pct":48.189,"area_m2":1008.93},{"quadra":9,"lote":7,"cx_pct":48.284,"cy_pct":49.424,"area_m2":1000},{"quadra":10,"lote":13,"cx_pct":47.611,"cy_pct":53.758,"area_m2":1000.43},{"quadra":10,"lote":21,"cx_pct":42.241,"cy_pct":41.955,"area_m2":1019.57},{"quadra":10,"lote":20,"cx_pct":42.82,"cy_pct":43.692,"area_m2":1008.3},{"quadra":10,"lote":19,"cx_pct":43.237,"cy_pct":45.649,"area_m2":1000.63},{"quadra":10,"lote":18,"cx_pct":43.557,"cy_pct":47.383,"area_m2":1001.01},{"quadra":10,"lote":17,"cx_pct":44.285,"cy_pct":49.15,"area_m2":1029.86},{"quadra":10,"lote":16,"cx_pct":44.898,"cy_pct":50.732,"area_m2":1018.11},{"quadra":10,"lote":15,"cx_pct":45.677,"cy_pct":51.985,"area_m2":1011.65},{"quadra":10,"lote":12,"cx_pct":44.999,"cy_pct":54.134,"area_m2":1090.23},{"quadra":10,"lote":14,"cx_pct":46.584,"cy_pct":53.068,"area_m2":1000.81},{"quadra":10,"lote":5,"cx_pct":37.771,"cy_pct":54.993,"area_m2":1001.5},{"quadra":10,"lote":7,"cx_pct":39.541,"cy_pct":54.728,"area_m2":1009.18},{"quadra":10,"lote":8,"cx_pct":40.579,"cy_pct":55.103,"area_m2":1000.18},{"quadra":10,"lote":9,"cx_pct":41.786,"cy_pct":55.046,"area_m2":1001.04},{"quadra":10,"lote":10,"cx_pct":42.934,"cy_pct":54.752,"area_m2":1000.88},{"quadra":13,"lote":12,"cx_pct":46.602,"cy_pct":65.697,"area_m2":1197.34},{"quadra":10,"lote":4,"cx_pct":36.702,"cy_pct":55.034,"area_m2":1000.8},{"quadra":13,"lote":11,"cx_pct":44.787,"cy_pct":65.684,"area_m2":1034.96},{"quadra":10,"lote":2,"cx_pct":33.593,"cy_pct":55.112,"area_m2":1002.7},{"quadra":10,"lote":3,"cx_pct":35.236,"cy_pct":55.068,"area_m2":1001.44},{"quadra":16,"lote":1,"cx_pct":28.292,"cy_pct":54.425,"area_m2":1121.37},{"quadra":10,"lote":1,"cx_pct":31.607,"cy_pct":54.436,"area_m2":1003.04},{"quadra":17,"lote":12,"cx_pct":30.572,"cy_pct":35.755,"area_m2":1000},{"quadra":17,"lote":11,"cx_pct":30.687,"cy_pct":38.035,"area_m2":1004.74},{"quadra":17,"lote":10,"cx_pct":31.575,"cy_pct":39.828,"area_m2":1235.06},{"quadra":17,"lote":22,"cx_pct":41.525,"cy_pct":40.276,"area_m2":1081.52},{"quadra":17,"lote":5,"cx_pct":35.547,"cy_pct":44.608,"area_m2":1010.41},{"quadra":17,"lote":2,"cx_pct":31.341,"cy_pct":46.029,"area_m2":1074.43},{"quadra":18,"lote":2,"cx_pct":20.593,"cy_pct":52.349,"area_m2":1531.2},{"quadra":18,"lote":1,"cx_pct":21.319,"cy_pct":50.76,"area_m2":1367.34},{"quadra":19,"lote":1,"cx_pct":13.374,"cy_pct":44.553,"area_m2":1003.2},{"quadra":19,"lote":2,"cx_pct":13.606,"cy_pct":46.215,"area_m2":1098.74},{"quadra":19,"lote":3,"cx_pct":13.539,"cy_pct":47.647,"area_m2":1008.06},{"quadra":19,"lote":10,"cx_pct":16.453,"cy_pct":48.375,"area_m2":1562.05},{"quadra":19,"lote":5,"cx_pct":13.46,"cy_pct":50.518,"area_m2":1000.68},{"quadra":19,"lote":4,"cx_pct":13.472,"cy_pct":49.1,"area_m2":1012.74},{"quadra":19,"lote":9,"cx_pct":16.325,"cy_pct":49.878,"area_m2":1072.08},{"quadra":19,"lote":8,"cx_pct":15.774,"cy_pct":51.526,"area_m2":1018.43},{"quadra":19,"lote":6,"cx_pct":13.61,"cy_pct":52.384,"area_m2":1000.71},{"quadra":19,"lote":7,"cx_pct":14.872,"cy_pct":53.626,"area_m2":1002.53},{"quadra":20,"lote":1,"cx_pct":10.471,"cy_pct":52.548,"area_m2":2465.22},{"quadra":20,"lote":2,"cx_pct":10.687,"cy_pct":53.903,"area_m2":1258.61},{"quadra":20,"lote":3,"cx_pct":10.309,"cy_pct":55.42,"area_m2":1167.72},{"quadra":20,"lote":4,"cx_pct":9.67,"cy_pct":56.891,"area_m2":1558.18},{"quadra":20,"lote":5,"cx_pct":9.204,"cy_pct":58.505,"area_m2":1715.39},{"quadra":21,"lote":1,"cx_pct":12.213,"cy_pct":58.599,"area_m2":1158.36},{"quadra":20,"lote":6,"cx_pct":8.556,"cy_pct":60.814,"area_m2":1809.31},{"quadra":21,"lote":2,"cx_pct":11.559,"cy_pct":60.244,"area_m2":1106.72},{"quadra":20,"lote":7,"cx_pct":8.433,"cy_pct":62.968,"area_m2":1699.6},{"quadra":21,"lote":3,"cx_pct":11.032,"cy_pct":62.13,"area_m2":1091.96},{"quadra":20,"lote":8,"cx_pct":8.549,"cy_pct":65.105,"area_m2":2224.68},{"quadra":20,"lote":9,"cx_pct":8.895,"cy_pct":67.126,"area_m2":2432.71},{"quadra":22,"lote":4,"cx_pct":17.508,"cy_pct":58.062,"area_m2":1449.52},{"quadra":22,"lote":3,"cx_pct":18.505,"cy_pct":60.614,"area_m2":1009.76},{"quadra":22,"lote":2,"cx_pct":17.081,"cy_pct":62.126,"area_m2":1004.3},{"quadra":23,"lote":5,"cx_pct":19.474,"cy_pct":64.426,"area_m2":1185.7},{"quadra":23,"lote":1,"cx_pct":13.776,"cy_pct":66.262,"area_m2":1020.28},{"quadra":23,"lote":2,"cx_pct":15.138,"cy_pct":65.887,"area_m2":1001.98},{"quadra":23,"lote":3,"cx_pct":16.751,"cy_pct":65.676,"area_m2":1010.93},{"quadra":23,"lote":4,"cx_pct":18.404,"cy_pct":65.319,"area_m2":1070.74},{"quadra":3,"lote":2,"cx_pct":63.968,"cy_pct":53.59,"area_m2":1000.01},{"quadra":27,"lote":2,"cx_pct":85.7,"cy_pct":32.82,"area_m2":1003.69},{"quadra":28,"lote":1,"cx_pct":80.848,"cy_pct":45.561,"area_m2":1017.41},{"quadra":28,"lote":2,"cx_pct":81.148,"cy_pct":47.165,"area_m2":1004.35},{"quadra":29,"lote":1,"cx_pct":88.309,"cy_pct":34.988,"area_m2":1043.36},{"quadra":30,"lote":1,"cx_pct":88.108,"cy_pct":37.034,"area_m2":1039.65},{"quadra":30,"lote":2,"cx_pct":87.691,"cy_pct":38.366,"area_m2":1196.21},{"quadra":30,"lote":3,"cx_pct":87.318,"cy_pct":39.691,"area_m2":1180.21},{"quadra":30,"lote":4,"cx_pct":87.402,"cy_pct":41.09,"area_m2":1062.6},{"quadra":30,"lote":5,"cx_pct":87.181,"cy_pct":42.517,"area_m2":1005.5},{"quadra":30,"lote":6,"cx_pct":86.898,"cy_pct":43.961,"area_m2":1024.56},{"quadra":30,"lote":7,"cx_pct":86.552,"cy_pct":45.522,"area_m2":1033.8},{"quadra":33,"lote":1,"cx_pct":85.966,"cy_pct":47.509,"area_m2":1009.07},{"quadra":33,"lote":7,"cx_pct":88.602,"cy_pct":47.993,"area_m2":1001.51},{"quadra":33,"lote":2,"cx_pct":86.164,"cy_pct":49.252,"area_m2":1003.58},{"quadra":33,"lote":6,"cx_pct":88.376,"cy_pct":49.694,"area_m2":1000.84},{"quadra":33,"lote":3,"cx_pct":86.553,"cy_pct":51.364,"area_m2":1000.08},{"quadra":33,"lote":5,"cx_pct":88.065,"cy_pct":51.727,"area_m2":1003.49},{"quadra":35,"lote":1,"cx_pct":82.599,"cy_pct":53.776,"area_m2":1003.68},{"quadra":35,"lote":3,"cx_pct":84.603,"cy_pct":52.924,"area_m2":1106.16},{"quadra":35,"lote":2,"cx_pct":82.645,"cy_pct":55.044,"area_m2":1019.34},{"quadra":36,"lote":1,"cx_pct":79.393,"cy_pct":53.367,"area_m2":1013.42},{"quadra":36,"lote":2,"cx_pct":79.889,"cy_pct":55.025,"area_m2":1065.94},{"quadra":37,"lote":1,"cx_pct":82.163,"cy_pct":60.988,"area_m2":1001.93},{"quadra":39,"lote":1,"cx_pct":78.665,"cy_pct":62.944,"area_m2":1474.58},{"quadra":37,"lote":2,"cx_pct":82.213,"cy_pct":63.084,"area_m2":1001.54},{"quadra":39,"lote":2,"cx_pct":79.464,"cy_pct":64.682,"area_m2":1179.72},{"quadra":37,"lote":3,"cx_pct":82.782,"cy_pct":64.682,"area_m2":1001.83},{"quadra":37,"lote":4,"cx_pct":83.628,"cy_pct":65.988,"area_m2":1001.26},{"quadra":37,"lote":5,"cx_pct":84.49,"cy_pct":67.086,"area_m2":1000.28},{"quadra":37,"lote":6,"cx_pct":85.454,"cy_pct":68.134,"area_m2":1446.08},{"quadra":39,"lote":3,"cx_pct":79.453,"cy_pct":66.294,"area_m2":1144.78},{"quadra":38,"lote":1,"cx_pct":82.461,"cy_pct":69.638,"area_m2":1004.7},{"quadra":39,"lote":5,"cx_pct":79.072,"cy_pct":69.374,"area_m2":1338.92},{"quadra":39,"lote":6,"cx_pct":79.072,"cy_pct":70.77,"area_m2":1360.9},{"quadra":40,"lote":1,"cx_pct":27.919,"cy_pct":35.957,"area_m2":1032.77},{"quadra":40,"lote":2,"cx_pct":27.795,"cy_pct":37.904,"area_m2":1038.73},{"quadra":40,"lote":4,"cx_pct":27.694,"cy_pct":41.046,"area_m2":1035.71},{"quadra":40,"lote":3,"cx_pct":27.753,"cy_pct":39.615,"area_m2":1008.05},{"quadra":40,"lote":5,"cx_pct":27.516,"cy_pct":42.838,"area_m2":1001.56},{"quadra":40,"lote":6,"cx_pct":27.227,"cy_pct":44.224,"area_m2":1045.79},{"quadra":40,"lote":7,"cx_pct":27.076,"cy_pct":45.555,"area_m2":1033.11},{"quadra":17,"lote":1,"cx_pct":30.187,"cy_pct":46.286,"area_m2":1167.98},{"quadra":17,"lote":9,"cx_pct":30.467,"cy_pct":42.072,"area_m2":null},{"quadra":17,"lote":8,"cx_pct":31.776,"cy_pct":41.962,"area_m2":null},{"quadra":17,"lote":7,"cx_pct":33.044,"cy_pct":41.944,"area_m2":null},{"quadra":17,"lote":6,"cx_pct":34.174,"cy_pct":41.797,"area_m2":null},{"quadra":17,"lote":4,"cx_pct":34.091,"cy_pct":46.078,"area_m2":null},{"quadra":17,"lote":3,"cx_pct":32.755,"cy_pct":46.114,"area_m2":null},{"quadra":10,"lote":6,"cx_pct":38.783,"cy_pct":54.827,"area_m2":null},{"quadra":10,"lote":11,"cx_pct":44.044,"cy_pct":54.456,"area_m2":null},{"quadra":9,"lote":8,"cx_pct":49.188,"cy_pct":50.177,"area_m2":null},{"quadra":9,"lote":9,"cx_pct":49.861,"cy_pct":51.922,"area_m2":null},{"quadra":9,"lote":10,"cx_pct":50.984,"cy_pct":51.227,"area_m2":null},{"quadra":9,"lote":11,"cx_pct":52.074,"cy_pct":50.702,"area_m2":null},{"quadra":9,"lote":12,"cx_pct":53.847,"cy_pct":50.903,"area_m2":null},{"quadra":9,"lote":13,"cx_pct":53.256,"cy_pct":49.311,"area_m2":null},{"quadra":8,"lote":1,"cx_pct":55.643,"cy_pct":47.179,"area_m2":null},{"quadra":8,"lote":2,"cx_pct":52.757,"cy_pct":43.734,"area_m2":null},{"quadra":15,"lote":1,"cx_pct":30.568,"cy_pct":58.643,"area_m2":null},{"quadra":15,"lote":2,"cx_pct":31.309,"cy_pct":59.894,"area_m2":null},{"quadra":15,"lote":3,"cx_pct":32.34,"cy_pct":61.424,"area_m2":null},{"quadra":15,"lote":4,"cx_pct":33.406,"cy_pct":63.169,"area_m2":null},{"quadra":14,"lote":1,"cx_pct":35.235,"cy_pct":67.573,"area_m2":null},{"quadra":14,"lote":2,"cx_pct":36.613,"cy_pct":67.637,"area_m2":null},{"quadra":14,"lote":3,"cx_pct":37.688,"cy_pct":67.876,"area_m2":null},{"quadra":14,"lote":4,"cx_pct":38.811,"cy_pct":68.078,"area_m2":null},{"quadra":14,"lote":5,"cx_pct":39.906,"cy_pct":68.234,"area_m2":null},{"quadra":14,"lote":6,"cx_pct":41.002,"cy_pct":68.492,"area_m2":null},{"quadra":14,"lote":7,"cx_pct":42.097,"cy_pct":68.648,"area_m2":null},{"quadra":14,"lote":8,"cx_pct":43.22,"cy_pct":68.813,"area_m2":null},{"quadra":14,"lote":9,"cx_pct":44.33,"cy_pct":69.034,"area_m2":null},{"quadra":14,"lote":10,"cx_pct":45.418,"cy_pct":69.144,"area_m2":null},{"quadra":14,"lote":11,"cx_pct":46.417,"cy_pct":69.41,"area_m2":null},{"quadra":13,"lote":1,"cx_pct":33.995,"cy_pct":58.038,"area_m2":null},{"quadra":13,"lote":2,"cx_pct":34.284,"cy_pct":59.93,"area_m2":null},{"quadra":13,"lote":3,"cx_pct":35.545,"cy_pct":62.769,"area_m2":null},{"quadra":13,"lote":4,"cx_pct":36.875,"cy_pct":62.925,"area_m2":null},{"quadra":13,"lote":5,"cx_pct":37.998,"cy_pct":63.164,"area_m2":null},{"quadra":13,"lote":6,"cx_pct":39.121,"cy_pct":63.393,"area_m2":null},{"quadra":13,"lote":7,"cx_pct":40.223,"cy_pct":63.614,"area_m2":null},{"quadra":13,"lote":8,"cx_pct":41.229,"cy_pct":63.834,"area_m2":null},{"quadra":13,"lote":9,"cx_pct":42.256,"cy_pct":63.99,"area_m2":null},{"quadra":13,"lote":10,"cx_pct":43.365,"cy_pct":64.193,"area_m2":null},{"quadra":13,"lote":13,"cx_pct":45.315,"cy_pct":63.118,"area_m2":null},{"quadra":13,"lote":14,"cx_pct":44.323,"cy_pct":61.951,"area_m2":null},{"quadra":13,"lote":15,"cx_pct":43.813,"cy_pct":60.849,"area_m2":null},{"quadra":13,"lote":16,"cx_pct":43.069,"cy_pct":59.324,"area_m2":null},{"quadra":13,"lote":17,"cx_pct":41.663,"cy_pct":60.187,"area_m2":null},{"quadra":13,"lote":18,"cx_pct":40.423,"cy_pct":60.187,"area_m2":null},{"quadra":13,"lote":19,"cx_pct":39.135,"cy_pct":60.123,"area_m2":null},{"quadra":13,"lote":20,"cx_pct":37.874,"cy_pct":60.068,"area_m2":null},{"quadra":13,"lote":21,"cx_pct":36.84,"cy_pct":59.921,"area_m2":null},{"quadra":13,"lote":22,"cx_pct":35.745,"cy_pct":59.737,"area_m2":null},{"quadra":12,"lote":1,"cx_pct":48.354,"cy_pct":69.473,"area_m2":null},{"quadra":12,"lote":2,"cx_pct":49.548,"cy_pct":69.627,"area_m2":null},{"quadra":12,"lote":3,"cx_pct":50.486,"cy_pct":69.658,"area_m2":null},{"quadra":12,"lote":4,"cx_pct":51.749,"cy_pct":69.457,"area_m2":null},{"quadra":12,"lote":5,"cx_pct":52.815,"cy_pct":69.164,"area_m2":null},{"quadra":12,"lote":6,"cx_pct":51.228,"cy_pct":71.604,"area_m2":null},{"quadra":11,"lote":1,"cx_pct":47.659,"cy_pct":59.678,"area_m2":null},{"quadra":11,"lote":2,"cx_pct":48.343,"cy_pct":60.991,"area_m2":null},{"quadra":11,"lote":3,"cx_pct":48.852,"cy_pct":62.273,"area_m2":null},{"quadra":11,"lote":4,"cx_pct":48.702,"cy_pct":64.946,"area_m2":null},{"quadra":11,"lote":5,"cx_pct":49.976,"cy_pct":64.776,"area_m2":null},{"quadra":11,"lote":6,"cx_pct":51.321,"cy_pct":64.869,"area_m2":null},{"quadra":11,"lote":7,"cx_pct":52.676,"cy_pct":64.683,"area_m2":null},{"quadra":11,"lote":8,"cx_pct":51.714,"cy_pct":62.598,"area_m2":null},{"quadra":11,"lote":9,"cx_pct":51.286,"cy_pct":61.362,"area_m2":null},{"quadra":11,"lote":10,"cx_pct":50.834,"cy_pct":60.11,"area_m2":null},{"quadra":11,"lote":11,"cx_pct":50.347,"cy_pct":58.55,"area_m2":null},{"quadra":11,"lote":13,"cx_pct":48.586,"cy_pct":57.314,"area_m2":null},{"quadra":11,"lote":14,"cx_pct":47.161,"cy_pct":57.855,"area_m2":null},{"quadra":11,"lote":15,"cx_pct":45.851,"cy_pct":58.519,"area_m2":null},{"quadra":7,"lote":1,"cx_pct":53.881,"cy_pct":57.206,"area_m2":null},{"quadra":7,"lote":2,"cx_pct":54.217,"cy_pct":58.643,"area_m2":null},{"quadra":7,"lote":3,"cx_pct":54.808,"cy_pct":60.033,"area_m2":null},{"quadra":7,"lote":4,"cx_pct":54.774,"cy_pct":62.397,"area_m2":null},{"quadra":7,"lote":5,"cx_pct":56.384,"cy_pct":61.686,"area_m2":null},{"quadra":7,"lote":6,"cx_pct":57.821,"cy_pct":60.836,"area_m2":null},{"quadra":7,"lote":7,"cx_pct":56.998,"cy_pct":59.168,"area_m2":null},{"quadra":7,"lote":8,"cx_pct":56.639,"cy_pct":57.608,"area_m2":null},{"quadra":7,"lote":9,"cx_pct":56.176,"cy_pct":56.294,"area_m2":null},{"quadra":7,"lote":10,"cx_pct":56.152,"cy_pct":54.132,"area_m2":null},{"quadra":7,"lote":11,"cx_pct":54.762,"cy_pct":54.394,"area_m2":null},{"quadra":7,"lote":12,"cx_pct":53.453,"cy_pct":55.058,"area_m2":null},{"quadra":7,"lote":13,"cx_pct":52.213,"cy_pct":55.615,"area_m2":null},{"quadra":6,"lote":1,"cx_pct":55.098,"cy_pct":71.944,"area_m2":null},{"quadra":6,"lote":2,"cx_pct":55.214,"cy_pct":70.693,"area_m2":null},{"quadra":6,"lote":3,"cx_pct":55.341,"cy_pct":68.963,"area_m2":null},{"quadra":6,"lote":4,"cx_pct":55.492,"cy_pct":67.217,"area_m2":null},{"quadra":6,"lote":5,"cx_pct":55.619,"cy_pct":65.425,"area_m2":null},{"quadra":6,"lote":6,"cx_pct":57.184,"cy_pct":65.209,"area_m2":null},{"quadra":6,"lote":7,"cx_pct":58.493,"cy_pct":65.27,"area_m2":null},{"quadra":6,"lote":8,"cx_pct":57.74,"cy_pct":67.588,"area_m2":null},{"quadra":6,"lote":9,"cx_pct":57.543,"cy_pct":69.133,"area_m2":null},{"quadra":6,"lote":10,"cx_pct":57.473,"cy_pct":70.878,"area_m2":null},{"quadra":6,"lote":11,"cx_pct":57.555,"cy_pct":72.377,"area_m2":null},{"quadra":5,"lote":1,"cx_pct":60.127,"cy_pct":70.801,"area_m2":null},{"quadra":5,"lote":2,"cx_pct":60.799,"cy_pct":68.437,"area_m2":null},{"quadra":5,"lote":3,"cx_pct":61.008,"cy_pct":66.784,"area_m2":null},{"quadra":5,"lote":4,"cx_pct":60.521,"cy_pct":64.529,"area_m2":null},{"quadra":5,"lote":5,"cx_pct":61.819,"cy_pct":64.544,"area_m2":null},{"quadra":5,"lote":6,"cx_pct":63.163,"cy_pct":64.761,"area_m2":null},{"quadra":5,"lote":7,"cx_pct":64.542,"cy_pct":65.162,"area_m2":null},{"quadra":5,"lote":8,"cx_pct":63.58,"cy_pct":67.356,"area_m2":null},{"quadra":5,"lote":9,"cx_pct":63.174,"cy_pct":68.901,"area_m2":null},{"quadra":5,"lote":11,"cx_pct":61.517,"cy_pct":72.13,"area_m2":null},{"quadra":1,"lote":1,"cx_pct":64.739,"cy_pct":73.103,"area_m2":null},{"quadra":1,"lote":2,"cx_pct":65.7,"cy_pct":71.574,"area_m2":null},{"quadra":1,"lote":3,"cx_pct":66.338,"cy_pct":70.26,"area_m2":null},{"quadra":1,"lote":4,"cx_pct":66.94,"cy_pct":68.793,"area_m2":null},{"quadra":1,"lote":5,"cx_pct":67.091,"cy_pct":67.171,"area_m2":null},{"quadra":1,"lote":6,"cx_pct":67.334,"cy_pct":65.657,"area_m2":null},{"quadra":1,"lote":7,"cx_pct":67.346,"cy_pct":63.942,"area_m2":null},{"quadra":4,"lote":1,"cx_pct":58.192,"cy_pct":53.344,"area_m2":null},{"quadra":4,"lote":2,"cx_pct":59.223,"cy_pct":55.537,"area_m2":null},{"quadra":4,"lote":3,"cx_pct":59.826,"cy_pct":57.53,"area_m2":null},{"quadra":4,"lote":4,"cx_pct":60.115,"cy_pct":60.296,"area_m2":null},{"quadra":4,"lote":5,"cx_pct":61.355,"cy_pct":60.327,"area_m2":null},{"quadra":4,"lote":6,"cx_pct":62.688,"cy_pct":60.775,"area_m2":null},{"quadra":4,"lote":7,"cx_pct":64.634,"cy_pct":61.532,"area_m2":null},{"quadra":4,"lote":8,"cx_pct":64.101,"cy_pct":59.709,"area_m2":null},{"quadra":4,"lote":9,"cx_pct":62.572,"cy_pct":58.21,"area_m2":null},{"quadra":4,"lote":10,"cx_pct":61.819,"cy_pct":56.603,"area_m2":null},{"quadra":4,"lote":11,"cx_pct":60.822,"cy_pct":54.981,"area_m2":null},{"quadra":4,"lote":12,"cx_pct":59.49,"cy_pct":52.957,"area_m2":null},{"quadra":24,"lote":1,"cx_pct":62.189,"cy_pct":51.459,"area_m2":null},{"quadra":24,"lote":2,"cx_pct":63.128,"cy_pct":50.192,"area_m2":null},{"quadra":3,"lote":7,"cx_pct":69.536,"cy_pct":54.58,"area_m2":null},{"quadra":2,"lote":2,"cx_pct":71.262,"cy_pct":59.647,"area_m2":null},{"quadra":2,"lote":3,"cx_pct":70.127,"cy_pct":59.245,"area_m2":null},{"quadra":2,"lote":4,"cx_pct":69.154,"cy_pct":59.122,"area_m2":null},{"quadra":2,"lote":5,"cx_pct":68.25,"cy_pct":59.013,"area_m2":null},{"quadra":2,"lote":6,"cx_pct":67.103,"cy_pct":58.689,"area_m2":null},{"quadra":22,"lote":5,"cx_pct":16.373,"cy_pct":60.064,"area_m2":null},{"quadra":25,"lote":1,"cx_pct":70.451,"cy_pct":45.465,"area_m2":null},{"quadra":25,"lote":2,"cx_pct":72.317,"cy_pct":44.893,"area_m2":null},{"quadra":25,"lote":3,"cx_pct":73.8,"cy_pct":44.429,"area_m2":null},{"quadra":25,"lote":4,"cx_pct":75.295,"cy_pct":43.688,"area_m2":null},{"quadra":25,"lote":5,"cx_pct":76.674,"cy_pct":43.333,"area_m2":null},{"quadra":25,"lote":6,"cx_pct":78.099,"cy_pct":42.699,"area_m2":null},{"quadra":25,"lote":7,"cx_pct":79.095,"cy_pct":42.437,"area_m2":null},{"quadra":27,"lote":1,"cx_pct":86.685,"cy_pct":31.251,"area_m2":null},{"quadra":27,"lote":3,"cx_pct":85.225,"cy_pct":34.604,"area_m2":null},{"quadra":27,"lote":4,"cx_pct":84.518,"cy_pct":35.824,"area_m2":null},{"quadra":27,"lote":5,"cx_pct":83.788,"cy_pct":37.199,"area_m2":null},{"quadra":27,"lote":6,"cx_pct":82.062,"cy_pct":40.335,"area_m2":null},{"quadra":26,"lote":1,"cx_pct":78.192,"cy_pct":48.693,"area_m2":null},{"quadra":26,"lote":2,"cx_pct":77.96,"cy_pct":47.411,"area_m2":null},{"quadra":26,"lote":3,"cx_pct":77.705,"cy_pct":46.113,"area_m2":null},{"quadra":26,"lote":4,"cx_pct":75.978,"cy_pct":47.936,"area_m2":null},{"quadra":26,"lote":5,"cx_pct":74.009,"cy_pct":47.087,"area_m2":null},{"quadra":39,"lote":4,"cx_pct":79.223,"cy_pct":67.789,"area_m2":null},{"quadra":39,"lote":7,"cx_pct":79.211,"cy_pct":72.825,"area_m2":null},{"quadra":38,"lote":2,"cx_pct":82.676,"cy_pct":71.141,"area_m2":null},{"quadra":28,"lote":3,"cx_pct":83.487,"cy_pct":45.634,"area_m2":null},{"quadra":32,"lote":1,"cx_pct":91.193,"cy_pct":52.988,"area_m2":null},{"quadra":31,"lote":1,"cx_pct":94.692,"cy_pct":39.208,"area_m2":null},{"quadra":30,"lote":8,"cx_pct":89.177,"cy_pct":46.113,"area_m2":null},{"quadra":30,"lote":9,"cx_pct":90.208,"cy_pct":42.22,"area_m2":null},{"quadra":22,"lote":1,"cx_pct":15.392,"cy_pct":62.502,"area_m2":null},{"quadra":34,"lote":1,"cx_pct":86.22,"cy_pct":57.67,"area_m2":null},{"quadra":32,"lote":2,"cx_pct":90.506,"cy_pct":54.272,"area_m2":null},{"quadra":32,"lote":3,"cx_pct":89.982,"cy_pct":55.686,"area_m2":null},{"quadra":32,"lote":4,"cx_pct":89.334,"cy_pct":56.825,"area_m2":null},{"quadra":32,"lote":5,"cx_pct":88.88,"cy_pct":58.24,"area_m2":null},{"quadra":32,"lote":6,"cx_pct":88.356,"cy_pct":59.434,"area_m2":null},{"quadra":32,"lote":7,"cx_pct":87.901,"cy_pct":60.665,"area_m2":null},{"quadra":32,"lote":8,"cx_pct":87.226,"cy_pct":62.025,"area_m2":null},{"quadra":31,"lote":2,"cx_pct":93.882,"cy_pct":42.403,"area_m2":null},{"quadra":31,"lote":3,"cx_pct":93.661,"cy_pct":43.928,"area_m2":null},{"quadra":31,"lote":4,"cx_pct":93.248,"cy_pct":45.306,"area_m2":null},{"quadra":31,"lote":5,"cx_pct":93.055,"cy_pct":46.757,"area_m2":null},{"quadra":31,"lote":6,"cx_pct":92.642,"cy_pct":48.172,"area_m2":null},{"quadra":31,"lote":7,"cx_pct":92.311,"cy_pct":49.458,"area_m2":null},{"quadra":31,"lote":8,"cx_pct":91.856,"cy_pct":51.02,"area_m2":null},{"quadra":33,"lote":4,"cx_pct":87.408,"cy_pct":53.965,"area_m2":null}];
+// ============================================================
+// STATE
+// ============================================================
+let ownerData = {};        // key: "Q_L" -> { representacao_juridica }
+let positions = [];        // active positions (from localStorage or original)
+let markers = [];          // leaflet circle markers
+let calibMode = false;
+let modalMarkerIndex = null;  // index in positions[] being edited
+let pendingLatLng = null;     // latlng for new marker
+
+const LS_KEY = 'rmata_positions';
+
+// ============================================================
+// POSITIONS — localStorage persistence
+// ============================================================
+function loadPositions() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch(e) {}
+  return LOT_POSITIONS_ORIGINAL.map(p => Object.assign({}, p));
+}
+
+function savePositions() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(positions)); } catch(e) {}
+}
+
+// ============================================================
+// MARKER HELPERS
+// ============================================================
+function ownerKey(q, l) { return q + '_' + l; }
+
+function getMarkerColor(q, l) {
+  const d = ownerData[ownerKey(q, l)];
+  if (!d || !d.representacao_juridica) return '#9E9E9E';
+  return d.representacao_juridica === 'sim' ? '#4CAF50' : '#FF9800';
+}
+
+function buildPopupHtml(p) {
+  const d = ownerData[ownerKey(p.quadra, p.lote)];
+  const rep = d && d.representacao_juridica;
+  const repLabel = !rep ? 'Sem dados' : (rep === 'sim' ? 'Adepto' : 'Não adepto');
+  const repClass = !rep ? 'background:#eee;color:#888' : (rep === 'sim' ? 'background:#d4edda;color:#155724' : 'background:#f8d7da;color:#721c24');
+  return `<div class="lot-popup">
+    <div class="pop-header">Quadra ${p.quadra} — Lote ${p.lote}</div>
+    <div class="pop-body">
+      <div class="pop-row">
+        <span class="pop-label">Repr. Jurídica</span>
+        <span class="rep-tag" style="${repClass}">${repLabel}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// RENDER MARKERS
+// ============================================================
+function renderMarkers() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  positions.forEach((p, idx) => {
+    const color = getMarkerColor(p.quadra, p.lote);
+    const latlng = pctToLatLng(p.cx_pct, p.cy_pct);
+    const circle = L.circleMarker(latlng, {
+      radius: 7,
+      fillColor: color,
+      color: calibMode ? '#c8a000' : 'rgba(0,0,0,0.35)',
+      weight: calibMode ? 2 : 1,
+      fillOpacity: 0.9,
+      bubblingMouseEvents: false,
+      pane: 'markerPane'
+    });
+
+    circle.bindTooltip(`Q${p.quadra} L${p.lote}`, {
+      className: 'lot-tooltip',
+      sticky: true,
+      direction: 'top',
+      offset: [0, -8]
+    });
+    circle.bindPopup(buildPopupHtml(p), { maxWidth: 230 });
+
+    if (calibMode) {
+      circle.on('click', function(e) {
+        L.DomEvent.stopPropagation(e);
+        openEditModal(idx, null);
+      });
+    }
+
+    circle.addTo(map);
+    markers.push(circle);
+  });
+}
+
+// ============================================================
+// CSV LOADING
+// ============================================================
+function loadCSV() {
+  Papa.parse('https://docs.google.com/spreadsheets/d/e/2PACX-1vSRQy2wKHDLqeYHFtQbkp9pZxiz1HTVB3pudC_YIfVUR13tVwrTACi4ZkqRJ44NepEO2HOvGPZ1f_vy/pub?output=csv&t=' + Date.now(), {
+    download: true,
+    header: true,
+    skipEmptyLines: true,
+    complete: function(results) {
+      ownerData = {};
+      results.data.forEach(row => {
+        // Normaliza chaves: remove acentos, espaços → underscore, lowercase
+        const norm = {};
+        Object.keys(row).forEach(k => {
+          const nk = k.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/\s+/g,'_');
+          norm[nk] = row[k];
+        });
+        const q = parseInt((norm.quadra || '').replace(/\D/g, ''));
+        const l = parseInt((norm.lote || '').replace(/\D/g, ''));
+        const repRaw = (norm.representacao_juridica || '').trim().toLowerCase();
+        const rep = ['sim', 's', 'yes', 'y', '1', 'true'].includes(repRaw) ? 'sim' : (repRaw ? 'nao' : '');
+        const proprietario = (norm['proprietario(a)'] || norm.proprietario || '').trim();
+        const contato = (norm.contato || '').trim();
+        if (!isNaN(q) && !isNaN(l)) {
+          ownerData[ownerKey(q, l)] = {
+            representacao_juridica: rep,
+            cadastrado: !!(proprietario && contato)
+          };
+        }
+      });
+      renderMarkers();
+      updateStats();
+      renderList();
+    },
+    error: function() {
+      // CSV not found — render with no data
+      renderMarkers();
+      updateStats();
+      renderList();
+    }
+  });
+}
+
+// ============================================================
+// STATS
+// ============================================================
+function updateStats() {
+  const total = positions.length;
+  const withData = positions.filter(p => { const d = ownerData[ownerKey(p.quadra, p.lote)]; return d && d.cadastrado; }).length;
+  const withRep = positions.filter(p => {
+    const d = ownerData[ownerKey(p.quadra, p.lote)];
+    return d && d.representacao_juridica === 'sim';
+  }).length;
+  const quadras = new Set(positions.map(p => p.quadra)).size;
+
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-owners').textContent = withData;
+  document.getElementById('stat-rep').textContent = withRep;
+  document.getElementById('stat-quadras').textContent = quadras;
+
+  const pctOwners = total > 0 ? (withData / total * 100).toFixed(2) : '0.00';
+  const pctRep = total > 0 ? (withRep / total * 100).toFixed(2) : '0.00';
+  document.getElementById('pct-owners').textContent = pctOwners + '%';
+  document.getElementById('bar-owners').style.width = parseFloat(pctOwners) + '%';
+  document.getElementById('pct-rep').textContent = pctRep + '%';
+  document.getElementById('bar-rep').style.width = parseFloat(pctRep) + '%';
+
+  document.getElementById('calib-count').textContent = total + ' marcadores carregados';
+}
+
+// ============================================================
+// SIDEBAR LIST
+// ============================================================
+function renderList(filter) {
+  const container = document.getElementById('lot-list');
+  let list = positions.slice().sort((a, b) => a.quadra - b.quadra || a.lote - b.lote);
+
+  if (filter) {
+    const f = filter.toLowerCase();
+    list = list.filter(p =>
+      ('q' + p.quadra).includes(f) ||
+      ('l' + p.lote).includes(f) ||
+      String(p.quadra).includes(f) ||
+      String(p.lote).includes(f)
+    );
+  }
+
+  if (!list.length) {
+    container.innerHTML = '<div class="empty-state">Nenhum lote encontrado</div>';
+    return;
+  }
+
+  container.innerHTML = list.map((p, i) => {
+    const d = ownerData[ownerKey(p.quadra, p.lote)];
+    const rep = d && d.representacao_juridica;
+    const hasDados = !!(d && d.cadastrado);
+    const repSim = rep === 'sim';
+    const repBadge = hasDados
+      ? `<span class="rep-badge ${repSim ? 'rep-sim' : 'rep-nao'}">${repSim ? 'Adepto' : 'Não adepto'}</span>`
+      : '';
+    const dadosBadge = hasDados ? '' : '<span class="rep-badge" style="background:#eee;color:#999">Sem dados</span>';
+    return `<div class="lot-item" data-idx="${i}" onclick="flyToLot(${p.quadra},${p.lote})">
+      <span class="lot-badge">Q${p.quadra} L${p.lote}</span>
+      <span class="lot-name ${hasDados ? '' : 'empty'}">${hasDados ? 'Com dados' : 'Sem dados'}</span>
+      ${hasDados ? repBadge : dadosBadge}
+    </div>`;
+  }).join('');
+}
+
+function flyToLot(q, l) {
+  const p = positions.find(x => x.quadra === q && x.lote === l);
+  if (!p) return;
+  const latlng = pctToLatLng(p.cx_pct, p.cy_pct);
+  map.setView(latlng, 1, { animate: true });
+  const idx = positions.indexOf(p);
+  if (markers[idx]) markers[idx].openPopup();
+}
+
+// Search
+document.getElementById('search-input').addEventListener('input', function() {
+  renderList(this.value.trim());
+});
+
+// ============================================================
+// CALIBRATION MODE
+// ============================================================
+function toggleCalibration() {
+  calibMode = !calibMode;
+  const btn = document.getElementById('btn-calibrate');
+  const banner = document.getElementById('calib-banner');
+  const legendPanel = document.getElementById('legend-panel');
+  const calibPanel = document.getElementById('calib-panel');
+  const mapEl = document.getElementById('map');
+
+  if (calibMode) {
+    btn.classList.add('active');
+    btn.textContent = '✏️ Sair da Calibração';
+    banner.classList.add('visible');
+    legendPanel.style.display = 'none';
+    calibPanel.classList.add('visible');
+    mapEl.classList.add('calibrating');
+    map.on('click', onMapClickCalib);
+  } else {
+    btn.classList.remove('active');
+    btn.textContent = '✏️ Modo Calibração';
+    banner.classList.remove('visible');
+    legendPanel.style.display = '';
+    calibPanel.classList.remove('visible');
+    mapEl.classList.remove('calibrating');
+    map.off('click', onMapClickCalib);
+  }
+  renderMarkers();
+}
+
+function onMapClickCalib(e) {
+  pendingLatLng = e.latlng;
+  openEditModal(null, e.latlng);
+}
+
+// ============================================================
+// MODAL — edit / add marker
+// ============================================================
+function openEditModal(idx, latlng) {
+  modalMarkerIndex = idx;
+  const overlay = document.getElementById('modal-overlay');
+  const deleteBtn = document.getElementById('btn-modal-delete');
+  const title = document.getElementById('modal-title');
+
+  if (idx !== null) {
+    // Editing existing
+    const p = positions[idx];
+    document.getElementById('modal-quadra').value = p.quadra;
+    document.getElementById('modal-lote').value = p.lote;
+    title.textContent = 'Editar Lote';
+    deleteBtn.style.display = '';
+  } else {
+    // Adding new
+    document.getElementById('modal-quadra').value = '';
+    document.getElementById('modal-lote').value = '';
+    title.textContent = 'Adicionar Novo Lote';
+    deleteBtn.style.display = 'none';
+  }
+  overlay.classList.add('visible');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('visible');
+  modalMarkerIndex = null;
+  pendingLatLng = null;
+}
+
+function confirmModal() {
+  const q = parseInt(document.getElementById('modal-quadra').value);
+  const l = parseInt(document.getElementById('modal-lote').value);
+  if (isNaN(q) || isNaN(l) || q < 1 || l < 1) {
+    alert('Por favor, insira números válidos para quadra e lote.');
+    return;
+  }
+
+  if (modalMarkerIndex !== null) {
+    // Update existing
+    positions[modalMarkerIndex].quadra = q;
+    positions[modalMarkerIndex].lote = l;
+  } else if (pendingLatLng) {
+    // Add new
+    const pct = latLngToPct(pendingLatLng);
+    positions.push({ quadra: q, lote: l, cx_pct: pct.cx_pct, cy_pct: pct.cy_pct, area_m2: null });
+  }
+
+  savePositions();
+  closeModal();
+  renderMarkers();
+  updateStats();
+  renderList(document.getElementById('search-input').value.trim());
+}
+
+function deleteCurrentMarker() {
+  if (modalMarkerIndex === null) return;
+  if (!confirm('Excluir este marcador?')) return;
+  positions.splice(modalMarkerIndex, 1);
+  savePositions();
+  closeModal();
+  renderMarkers();
+  updateStats();
+  renderList(document.getElementById('search-input').value.trim());
+}
+
+// ============================================================
+// EXPORT / RESET
+// ============================================================
+function exportCalibration() {
+  const data = JSON.stringify(positions);
+  const output = `const LOT_POSITIONS_ORIGINAL = ${data};`;
+  document.getElementById('export-textarea').value = output;
+  document.getElementById('export-output').classList.add('visible');
+}
+
+function copyExport() {
+  const ta = document.getElementById('export-textarea');
+  ta.select();
+  document.execCommand('copy');
+  const btn = document.querySelector('.btn-copy');
+  btn.textContent = '✅ Copiado!';
+  setTimeout(() => { btn.textContent = '📋 Copiar'; }, 2000);
+}
+
+function resetCalibration() {
+  if (!confirm('Restaurar todos os marcadores para os dados originais? As alterações serão perdidas.')) return;
+  localStorage.removeItem(LS_KEY);
+  positions = loadPositions();
+  renderMarkers();
+  updateStats();
+  renderList();
+  alert('Marcadores restaurados para os dados originais.');
+}
+
+// ============================================================
+// INIT
+// ============================================================
+positions = loadPositions();
+loadCSV();
+</script>
+</body>
+</html>
