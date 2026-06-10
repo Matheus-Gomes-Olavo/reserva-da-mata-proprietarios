@@ -42,6 +42,21 @@
     }
     .header-spacer { flex: 1; }
 
+    /* Sidebar toggle button */
+    #btn-toggle-sidebar {
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1.5px solid #5ab05a;
+      background: transparent;
+      color: #8fc98f;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    #btn-toggle-sidebar:hover { background: #2d4a2d; }
+    #btn-toggle-sidebar.hidden-sidebar { background: #3a7a3a; border-color: #3a7a3a; color: #fff; }
+
     /* Calibration toggle button */
     #btn-calibrate {
       padding: 6px 14px;
@@ -259,7 +274,7 @@
     <div class="subtitle">Mapa Interativo de Proprietários</div>
   </div>
   <div class="header-spacer"></div>
-  <button id="btn-calibrate" onclick="toggleCalibration()">✏️ Modo Calibração</button>
+  <button id="btn-toggle-sidebar" onclick="toggleSidebar()">☰ Resumo</button>
 </header>
 
 <div id="calib-banner">
@@ -744,6 +759,19 @@ function resetCalibration() {
   updateStats();
   renderList();
   alert('Marcadores restaurados para os dados originais.');
+}
+
+// ============================================================
+// SIDEBAR TOGGLE
+// ============================================================
+function toggleSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const btn = document.getElementById('btn-toggle-sidebar');
+  const hidden = sidebar.style.display === 'none';
+  sidebar.style.display = hidden ? '' : 'none';
+  btn.classList.toggle('hidden-sidebar', !hidden);
+  btn.textContent = hidden ? '☰ Resumo' : '☰ Resumo';
+  setTimeout(() => map.invalidateSize(), 50);
 }
 
 // ============================================================
