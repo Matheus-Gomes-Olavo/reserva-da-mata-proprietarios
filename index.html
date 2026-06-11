@@ -14,7 +14,7 @@
 
     body {
       font-family: 'Segoe UI', Arial, sans-serif;
-      background: #1a2e1a;
+      background: #f4f1ec;
       color: #333;
       height: 100vh;
       display: flex;
@@ -23,7 +23,7 @@
 
     /* ── Header ── */
     header {
-      background: #1a2e1a;
+      background: #2c2c2a;
       color: #fff;
       padding: 8px 16px;
       display: flex;
@@ -54,7 +54,7 @@
       cursor: pointer;
       transition: all 0.2s;
     }
-    #btn-toggle-sidebar:hover { background: #2d4a2d; }
+    #btn-toggle-sidebar:hover { background: #3a3a38; }
     #btn-toggle-sidebar.hidden-sidebar { background: #3a7a3a; border-color: #3a7a3a; color: #fff; }
 
     /* Calibration toggle button */
@@ -70,7 +70,7 @@
       transition: all 0.2s;
       display: flex; align-items: center; gap: 6px;
     }
-    #btn-calibrate:hover { background: #2d4a2d; }
+    #btn-calibrate:hover { background: #3a3a38; }
     #btn-calibrate.active { background: #c8a000; border-color: #c8a000; color: #fff; }
     #btn-calibrate.active:hover { background: #a87f00; }
 
@@ -92,7 +92,7 @@
     .main { display: flex; flex: 1; overflow: hidden; }
 
     /* ── Map ── */
-    #map { flex: 1; background: #2d4a2d; }
+    #map { flex: 1; background: #dbd7d0; }
     #map.calibrating { cursor: crosshair !important; }
     #map.calibrating .leaflet-container { cursor: crosshair !important; }
 
@@ -208,7 +208,7 @@
       padding: 24px; width: 320px;
       box-shadow: 0 8px 32px rgba(0,0,0,0.3);
     }
-    .modal h3 { font-size: 1rem; margin-bottom: 16px; color: #1a2e1a; }
+    .modal h3 { font-size: 1rem; margin-bottom: 16px; color: #212121; }
     .modal label { font-size: 0.78rem; color: #555; display: block; margin-bottom: 4px; margin-top: 12px; }
     .modal label:first-of-type { margin-top: 0; }
     .modal input, .modal select {
